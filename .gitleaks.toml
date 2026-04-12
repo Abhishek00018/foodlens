@@ -1,0 +1,52 @@
+# Gitleaks configuration for Caltrack
+# Docs: https://github.com/gitleaks/gitleaks
+title = "Caltrack Secret Scanner"
+
+[extend]
+# Use gitleaks' built-in ruleset as the base (covers AWS keys, tokens, etc.)
+useDefault = true
+
+# ─── Project-specific rules ───────────────────────────────────────────────────
+
+[[rules]]
+id = "caltrack-db-password"
+description = "Hardcoded database password"
+regex = '''(?i)(DB_PASSWORD|datasource\.password|spring\.datasource\.password)\s*[=:]\s*["']?[^\$\{][^\s"']{4,}'''
+tags = ["credentials", "database"]
+
+[[rules]]
+id = "caltrack-cognito-secret"
+description = "Hardcoded AWS Cognito client secret"
+regex = '''(?i)(cognito.client.secret|cognito_client_secret|COGNITO_CLIENT_SECRET)\s*[=:]\s*["']?[A-Za-z0-9+/]{20,}'''
+tags = ["credentials", "aws", "cognito"]
+
+[[rules]]
+id = "caltrack-aws-region-hardcoded"
+description = "Hardcoded AWS region (prefer env var)"
+regex = '''(?i)(aws\.region|AWS_REGION)\s*[=:]\s*["']?(us|ap|eu|sa|ca|me|af)-[a-z]+-[0-9]["']?'''
+tags = ["config", "aws"]
+# This is low severity — warn, not block
+severity = "warning"
+
+# ─── Allowlist (known safe patterns, not real secrets) ────────────────────────
+
+[allowlist]
+description = "Known safe patterns"
+regexes = [
+    # Placeholder values in example/template files
+    '''YOUR_DB_USER''',
+    '''YOUR_DB_PASSWORD''',
+    '''PLACEHOLDER''',
+    '''placeholder''',
+    # Environment variable references — safe, not actual values
+    '''\$\{[A-Z_]+\}''',
+    '''\$\{[A-Z_]+:[^}]+\}''',
+]
+paths = [
+    # Example/template files are safe to scan past
+    '''application-local\.properties\.example''',
+    '''\.env\.example''',
+    '''\.env\.template''',
+    # Claude agent config — contains Figma file keys (not secrets)
+    '''\.claude/agents/''',
+]

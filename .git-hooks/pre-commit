@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Caltrack pre-commit hook — scans staged files for secrets using gitleaks.
+# Install: cp .git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+# ─── Check gitleaks is installed ─────────────────────────────────────────────
+if ! command -v gitleaks &> /dev/null; then
+    echo "⚠️  gitleaks not found. Install it first:"
+    echo "   brew install gitleaks"
+    echo "   Then re-run your commit."
+    exit 1
+fi
+
+# ─── Scan only staged files ───────────────────────────────────────────────────
+echo "🔍 Scanning staged files for secrets..."
+
+gitleaks protect \
+    --config=".gitleaks.toml" \
+    --staged \
+    --verbose \
+    --redact
+
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    echo ""
+    echo "❌ Secret detected in staged files. Commit blocked."
+    echo "   Review the finding above, remove the secret, and use environment variables instead."
+    echo "   If this is a false positive, add it to the allowlist in .gitleaks.toml"
+    exit 1
+fi
+
+echo "✅ No secrets detected. Proceeding with commit."
+exit 0

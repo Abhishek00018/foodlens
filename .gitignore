@@ -1,0 +1,66 @@
+# ─── Secrets & Credentials (NEVER commit these) ──────────────────────────────
+.env
+.env.*
+*.env
+!*.env.example
+!*.env.template
+
+# AWS
+.aws/
+aws-credentials
+aws-exports.json
+*.pem
+*.key
+
+# Keystores & signing (Android release signing)
+*.keystore
+*.jks
+*.p12
+*.pfx
+release-keystore.properties
+keystore.properties
+
+# ─── Android ──────────────────────────────────────────────────────────────────
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/.idea/
+android/*.iml
+android/**/*.iml
+android/app/release/
+
+# ─── Spring Boot / Java Backend ───────────────────────────────────────────────
+# Local profile with real DB/Redis credentials — use env vars instead
+**/application-local.properties
+# Keep the example file
+!**/application-local.properties.example
+
+# Maven build output
+**/target/
+**/pom.xml.tag
+**/pom.xml.releaseBackup
+**/pom.xml.versionsBackup
+**/release.properties
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+# Keep docker-compose.yml (no secrets there — uses env vars)
+# But exclude any override files that might have real values
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
