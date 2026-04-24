@@ -1,6 +1,6 @@
 # Caltrack Backend — Status & API Contract
 
-> **Last updated:** 2026-04-11
+> **Last updated:** 2026-04-24
 > **Location:** `/Users/abhisheksharma/IdeaProjects/Caltrack/`
 > **Stack:** Spring Boot 4.0.5, Java 21, Maven, MySQL 8, AWS (Bedrock, S3, Cognito)
 
@@ -12,6 +12,17 @@
 
 ---
 
+## Original Plan
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| 1 | Core infrastructure (DB schema, entities, Flyway, security) | ✅ DONE |
+| 2 | All controllers, services, DTOs, S3, Bedrock analysis | ✅ DONE (scan needs refactor) |
+| 3 | Scan flow refactor (multipart → 3-step S3), response fixes | ⏳ PENDING (Android is waiting) |
+| 4 | Testing, prod deploy (EC2 + RDS + ECR) | ⏳ PENDING |
+
+---
+
 ## What's DONE
 
 ### Infrastructure
@@ -19,7 +30,7 @@
 |-------|-------|--------|
 | `pom.xml` | Root | Done — Spring Boot 4.0.5, AWS SDK 2.31.24, Flyway, OAuth2 Resource Server, Lombok |
 | `application.properties` | Config | Done — JWT, AWS, rate limit, multipart, actuator |
-| `application-local.properties` | Local profile | Done — MySQL localhost, Redis, mock JWT issuer |
+| `application-local.properties` | Local profile | Done — MySQL localhost, port **8098**, mock JWT issuer |
 | `docker-compose.yml` | `/Caltrack/docker-compose.yml` | Done — MySQL 8.0 on port 3306 (user: caltrack / pass: caltrack_pass) |
 | `V1__init_schema.sql` | Flyway migration | Done — 5 tables: user_profiles, daily_goals, user_allergies, meals, meal_items |
 
@@ -33,15 +44,13 @@
 | `Meal` | meals | name, totalCalories/Protein/Carbs/Fat, imageKey, mealDate, mealTime, overallConfidence, aiRawResponse, userEdited, allergenWarnings |
 | `MealItem` | meal_items | name, weightGrams, calories, protein, carbs, fat, confidence, containsAllergens |
 
-### Repositories, DTOs, Mappers, Services, Security
-*(All done — see original plan. No changes needed here.)*
-
+### Services
 | Service | Status |
 |---------|--------|
 | `UserService` | Done |
-| `MealService` | Done — BUT `scanMeal()` currently takes a multipart file. **Needs refactor** (see Pending §1) |
-| `MealAnalysisService` | Done — Bedrock Converse API, Claude Vision |
-| `S3Service` | Done — `uploadImage`, `getPresignedUrl` (5 min TTL), `deleteImage`. **Needs new method:** `generateUploadPresignedUrl()` |
+| `MealService` | Done — BUT `scanMeal()` still takes multipart file. **Must refactor** (see Pending §1) |
+| `MealAnalysisService` | Done — Bedrock Converse API, Claude Vision (`us.anthropic.claude-sonnet-4-6`) |
+| `S3Service` | Done — `uploadImage`, `getPresignedUrl` (5-min GET TTL), `deleteImage`. **Needs `generateUploadPresignedUrl()`** |
 | `AllergyCheckService` | Done |
 
 ### Controllers
@@ -59,224 +68,170 @@ GET    /api/user/export
 
 **MealController** (`/api/meals`) — Partially Done ⚠️
 ```
-POST   /api/meals/scan            ← BREAKING CHANGE: was multipart, now JSON body {imageKey, contentType}
+POST   /api/meals/scan            ← BREAKING: was multipart, must become JSON {imageKey, contentType}
 POST   /api/meals
 GET    /api/meals?date=YYYY-MM-DD
 GET    /api/meals/{id}
 PUT    /api/meals/{id}
-DELETE /api/meals/{id}
+DELETE /api/meals/{id}            ← must return 200 {status:success, data:null}, NOT 204
 GET    /api/meals/weekly
 ```
 New endpoint needed:
 ```
-GET    /api/meals/scan/upload-url?contentType=image/jpeg   ← NEW endpoint
+GET    /api/meals/scan/upload-url?contentType=image/jpeg   ← MUST ADD
 ```
 
 ---
 
-## What's PENDING (Backend)
+## What's PENDING (Backend) — Priority Order
 
-### 1. ⚠️ BREAKING CHANGE — Scan Flow Refactor (PRIORITY)
+### 1. ⚡ BREAKING — Scan Flow Refactor (Android is blocked until this is done)
 
-**Old flow (remove this):**
-```
-POST /api/meals/scan   multipart/form-data   image file → ScanResponse
-```
+Android has **already been updated** to use the 3-step flow. Backend must match.
 
-**New flow (implement this):**
-```
-Step 1: GET  /api/meals/scan/upload-url?contentType=image/jpeg  → UploadUrlResponse
-Step 2: (Android PUTs image directly to S3 using the presigned URL — backend not involved)
-Step 3: POST /api/meals/scan   { "imageKey": "...", "contentType": "image/jpeg" }  → ScanResponse
-```
+**Remove:**
+- `@RequestPart MultipartFile image` from `POST /api/meals/scan`
+- multipart config in `application.properties` (or leave for other uses)
+- Rate limit on the old multipart endpoint
 
-**Why:** Android uploads large image files directly to S3, avoiding proxying through the backend. This reduces backend memory pressure, latency, and cost.
-
-#### Step 1 — New endpoint: `GET /api/meals/scan/upload-url`
-
+**Add — `GET /api/meals/scan/upload-url`:**
 ```java
 // New DTO: UploadUrlResponse
-{
-  "uploadUrl":       "https://s3.amazonaws.com/bucket/key?X-Amz-...",  // presigned PUT URL
-  "imageKey":        "meals/uuid-here.jpg",                             // key to use in Step 3
-  "expiresInSeconds": 300
-}
-```
+{ "uploadUrl": "https://s3.../key?X-Amz-...", "imageKey": "meals/uuid.jpg", "expiresInSeconds": 300 }
 
-Implementation in `S3Service`:
-```java
+// In S3Service:
 public UploadUrlResponse generateUploadPresignedUrl(String contentType) {
     String key = "meals/" + UUID.randomUUID() + ".jpg";
-    // Use S3Presigner to create a presigned PUT URL with 5-min expiry
-    // Content-Type must match what Android sends in Step 2
+    // S3Presigner → presigned PUT URL, 5-min expiry, Content-Type must match
     return new UploadUrlResponse(presignedPutUrl, key, 300);
 }
 ```
+Rate limit: 10/min (same as before, move to this endpoint).
 
-Rate limit: Apply same 10/min sliding window as before (on the `upload-url` endpoint, not on `/scan`).
-
-#### Step 3 — Refactor `POST /api/meals/scan`
-
-**New request body:**
+**Refactor — `POST /api/meals/scan` (now JSON body):**
 ```java
 // New DTO: ScanRequest
-{
-  "imageKey":    "meals/uuid-here.jpg",   // required — key already uploaded to S3
-  "contentType": "image/jpeg"             // optional, default "image/jpeg"
-}
+{ "imageKey": "meals/uuid.jpg", "contentType": "image/jpeg" }
+
+// In MealService.scanMeal():
+// OLD: upload file to S3 (remove)
+// NEW: imageKey already in S3 — fetch bytes via S3Client.getObject(bucket, key)
+//      → send to MealAnalysisService (Bedrock) — unchanged
+//      → run allergy check — unchanged
+//      → return ScanResponse (include imageKey + imageUrl)
 ```
 
-**Implementation in `MealService.scanMeal()`:**
-```java
-// Old: upload file to S3 (remove this)
-// New: skip S3 upload — the key already exists, go straight to Bedrock
-String imageKey = request.getImageKey();
-// 1. Get the S3 object bytes (for Bedrock) — use S3Client.getObject(bucket, key)
-// 2. Send to MealAnalysisService (Bedrock) — same as before
-// 3. Run allergy check — same as before
-// 4. Return ScanResponse (include imageKey in response)
-```
-
-**Remove:** `@RequestPart MultipartFile image` from the controller method.
-**Remove:** multipart config from `application.properties` (or keep for other uses).
-**Remove:** The `RateLimitFilter` on multipart POST — move rate limit to `GET /api/meals/scan/upload-url`.
-
-#### ScanResponse — confirm these fields are present
+**ScanResponse — confirm all these fields:**
 ```json
 {
   "foodName": "Grilled Chicken Salad",
   "calories": 580,
-  "protein": 42.0,
-  "carbs": 18.0,
-  "fat": 22.0,
+  "protein": 42.0, "carbs": 18.0, "fat": 22.0,
   "confidence": 0.92,
-  "items": [...],
+  "items": [{ "name": "...", "calories": 200, "protein": 15.0, "carbs": 5.0, "fat": 8.0, "weightGrams": 150 }],
   "allergenWarnings": ["Dairy"],
-  "imageKey": "meals/uuid-here.jpg",   ← Android stores this in Room
+  "imageKey": "meals/uuid-here.jpg",
+  "imageUrl": "https://s3.amazonaws.com/...?X-Amz-...",
   "notes": "..."
 }
 ```
 
 ---
 
-### 2. DELETE /api/meals/{id} — Response Body Confirmation
+### 2. DELETE /api/meals/{id} — Response Body
+Android sends `Response<ApiEnvelope<Unit>>` — expects a body.
 
-Android sends `Response<ApiEnvelope<Unit>>`.
+**Required:** Return `200 {"status":"success","data":null}` (NOT 204 No Content).
 
-**Required:** Return `200 {"status":"success","data":null}` (not 204 No Content).
-
-Reason: Retrofit + Gson will try to parse the body. A 204 with no body causes `ApiEnvelope<Unit>` deserialization to return null, which Android handles OK — but for consistency with all other endpoints, return 200 with the success envelope.
-
-Action: Verify the controller method returns `ResponseEntity.ok(ApiResponse.success(null))` or equivalent.
+Fix: `return ResponseEntity.ok(ApiResponse.success(null));`
 
 ---
 
-### 3. MealResponse — Add `imageUrl` (Presigned GET URL) Field
-
-Android needs to display meal images from S3 in MealDetail and History screens. Since Android only stores `imageKey` (the S3 object key), the backend must provide a presigned GET URL.
+### 3. MealResponse — Add `imageUrl` Field
+Android needs presigned GET URL to display meal images in MealDetail and History.
 
 **Add to `MealResponse`:**
 ```json
-{
-  "id": "...",
-  "name": "...",
-  "imageKey": "meals/uuid.jpg",
-  "imageUrl": "https://s3.amazonaws.com/...?X-Amz-...&Expires=...",  ← NEW, nullable
-  ...
+{ "imageKey": "meals/uuid.jpg", "imageUrl": "https://s3.amazonaws.com/...?X-Amz-...", ... }
+```
+
+**In `MealMapper.toMealResponse()`:**
+```java
+if (meal.getImageKey() != null) {
+    response.setImageUrl(s3Service.getPresignedUrl(meal.getImageKey())); // existing method, 5-min TTL
 }
 ```
 
-**Implementation in `MealMapper.toMealResponse()`:**
-```java
-// If meal.getImageKey() != null:
-String imageUrl = s3Service.getPresignedUrl(meal.getImageKey()); // existing method, 5-min TTL
-response.setImageUrl(imageUrl);
-```
-
-**Also add `imageUrl` to `ScanResponse`** (presigned GET URL for the just-uploaded image).
-
-Android's Coil image loader will use this URL directly. No changes needed on Android side.
+Also add `imageUrl` to `ScanResponse` (presigned GET URL for the just-uploaded image).
 
 ---
 
-### 4. MealRequest.date Field Name — Confirm
+### 4. MealRequest.date Field Name
+Android sends: `{ "date": "2026-04-24", ... }`
 
-Android sends: `{ "date": "2026-04-11", ... }` (field name is `date`).
-
-Verify `MealRequest` DTO has `@JsonProperty("date")` or a field named `date` (not `mealDate`).
+Verify `MealRequest` DTO uses field name `date` (not `mealDate`). Add `@JsonProperty("date")` if needed.
 
 ---
 
 ### 5. JWT Auth — Dev/Test Mode
+Android Cognito is not yet integrated. API calls arrive with NO `Authorization` header during dev.
 
-Android auth (Cognito) is not yet integrated. API calls arrive with NO Authorization header during dev/testing.
+Options (pick one):
+- Add `@Profile("local")` security bypass that accepts `X-Dev-User-Id: test-user-1` as cognitoSub
+- Disable auth entirely for local profile (`@ConditionalOnProperty`)
+- Document how to generate a test JWT from the mock issuer in `application-local.properties`
 
-**Action:** Document how to generate a valid test JWT using the mock issuer in `application-local.properties`.
-
-Example curl to get test token (fill in your mock issuer URL):
-```bash
-# With spring-security-test or Cognito local mock:
-# Option: disable security for local profile (add @Profile("local") to SecurityConfig)
-# OR: provide a static test JWT signed with the mock key
-```
-
-Suggestion: For local development, add a `@ConditionalOnProperty` or `@Profile("local")` security bypass that accepts a static header `X-Dev-User-Id: test-user-1` as the cognitoSub. Remove before prod.
+**Remove before prod.**
 
 ---
 
 ### 6. Error Response Shape — Verify All Handlers
-
 Android parses: `{"status":"error","error":{"code":"...","message":"..."}}`
 
-Verify ALL exception handler methods in `GlobalExceptionHandler` return `ApiResponse.error(code, message)`. Jackson must serialize `ErrorDetail` as `{"code":"...","message":"..."}` (not `{"errorCode":...}`).
+Verify ALL handlers in `GlobalExceptionHandler` return `ApiResponse.error(code, message)` with `ErrorDetail` serialized as `{"code":"...","message":"..."}` (not `{"errorCode":...}`).
 
 ---
 
 ### 7. CORS — Confirm OPTIONS Preflight
+Android emulator base URL: `http://10.0.2.2:8098`
 
-Android emulator base URL: `http://10.0.2.2:8080`
-
-`CorsConfig` sets `allowedOrigins("*")` — confirm this also handles OPTIONS preflight requests. Spring's `CorsConfigurationSource` bean typically handles this automatically when registered in the security filter chain.
+`CorsConfig.allowedOrigins("*")` — confirm OPTIONS preflight requests are handled (Spring's `CorsConfigurationSource` in the security filter chain typically handles this automatically).
 
 ---
 
-### 8. GET /api/meals/weekly — Response Shape Confirmation
-
-Android expects:
+### 8. GET /api/meals/weekly — Response Shape
+Android's Vico weekly chart expects exactly:
 ```json
-{
-  "status": "success",
-  "data": {
-    "days": [
-      { "date": "2026-04-05", "totalCalories": 1850.0 },
-      { "date": "2026-04-06", "totalCalories": 2100.0 },
-      ...
-    ]
-  }
-}
+{ "status": "success", "data": { "days": [{ "date": "2026-04-18", "totalCalories": 1850.0 }, ...] } }
 ```
-
-Only `date` and `totalCalories` per day are used by Android (WeeklyChart). Confirm `WeeklySummaryResponse` has this exact structure.
+Only `date` + `totalCalories` per day are consumed. Confirm `WeeklySummaryResponse` matches.
 
 ---
 
 ### 9. Testing
-- Unit tests for services (mock repos)
+- Unit tests for services (mock repositories)
 - Integration tests for controllers (MockMvc + H2 or Testcontainers)
+
+---
+
+### 10. Prod Deploy
+- Dockerize + push to ECR
+- Deploy to EC2, RDS MySQL, S3 bucket policy
+- Update Android `BASE_URL` for production
 
 ---
 
 ## Full API Contract (Final — What Android Calls)
 
 ### Base URL
-- **Local dev (emulator):** `http://10.0.2.2:8080`
+- **Local dev (emulator → host):** `http://10.0.2.2:8098` ← port 8098 (application-local.properties)
 - **Production:** TBD (EC2)
 
 ### Authentication
 ```
 Authorization: Bearer <cognito_jwt_token>
 ```
-All endpoints require this header except: actuator health.
+All endpoints require this header. (Currently unenforced in local dev — see §5 above.)
 
 ### Response Envelope (all responses)
 ```json
@@ -284,10 +239,9 @@ All endpoints require this header except: actuator health.
 { "status": "error",   "error": { "code": "NOT_FOUND", "message": "..." } }
 ```
 
-### Full Endpoint List (what Android's Retrofit calls)
-
+### Full Endpoint List
 ```
-# Scan (3-step — see §1 above)
+# Scan (3-step)
 GET  /api/meals/scan/upload-url?contentType=image/jpeg  → UploadUrlResponse
 POST /api/meals/scan                                     → ScanResponse      body: {imageKey, contentType}
 
@@ -310,8 +264,8 @@ PUT  /api/user/allergies              → AllergyResponse   body: AllergyRequest
 
 ### Key Data Types
 - All IDs: UUID strings
-- Dates: ISO `"2026-04-07"`
-- Macros: `Double` in JSON (`42.0`), Android converts to `Int` for display
+- Dates: ISO `"2026-04-24"`
+- Macros: `Double` in JSON (`42.0`)
 - Confidence: `0.0–1.0`
 - `null` fields omitted (Jackson `NON_NULL`)
 

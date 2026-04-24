@@ -1,192 +1,152 @@
 # Caltrack Android — Status & Integration Contract
 
-> **Last updated:** 2026-04-11
+> **Last updated:** 2026-04-24
 > **Location:** `/Users/abhisheksharma/Caltrack/android/`
+> **Repo:** `https://github.com/Abhishek00018/foodlens` (branch: `main`)
 > **Stack:** Kotlin, Jetpack Compose, CameraX, Room, Hilt, Retrofit, Coil, Vico
 
 ---
 
-## Build Status: COMPILES SUCCESSFULLY ✅
+## Build Status: COMPILES ✅ | Git: PUSHED ✅
 
-Last build: `assembleDebug` passed. App runs on emulator.
+Last build: `assembleDebug` passed. All 62 source files committed and pushed to GitHub.
+
+---
+
+## Original Plan (3 Phases)
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| 1 | Wire all screens to real ViewModels (no hardcoded data) | ✅ DONE |
+| 2 | Replace multipart scan with 3-step S3 flow | ✅ DONE |
+| 3 | Auth (Cognito), WorkManager sync, error polish, onboarding | ⏳ PENDING |
 
 ---
 
 ## What's DONE (Android)
 
-### UI Screens — All wired to real ViewModels (no more sample data)
+### UI Screens — All wired to real ViewModels (no sample data)
 | Screen | File | Status |
 |--------|------|--------|
 | Login | `ui/auth/LoginScreen.kt` | Done — email/password + Google button + "Skip for now" dev mode. No real Cognito auth yet. |
-| Dashboard | `ui/dashboard/DashboardScreen.kt` | **Done** — wired to DashboardViewModel. Real Room data. |
-| Camera | `ui/camera/CameraScreen.kt` | **Done** — CameraX, captures photo, calls CameraViewModel.scanImage(). |
-| Scan Result | `ui/camera/ScanResultSheet.kt` | **Done** — shows real ScanResponse from backend, allergen warnings, confidence. |
-| History | `ui/history/HistoryScreen.kt` | **Done** — wired to HistoryViewModel. Real Room 7-day data, weekly chart. |
-| Profile | `ui/profile/ProfileScreen.kt` | **Done** — wired to ProfileViewModel. Reads/writes DataStore + API. |
-| Meal Detail | `ui/meal/MealDetailScreen.kt` | **Done** — wired to MealDetailViewModel. Real Room data. |
+| Dashboard | `ui/dashboard/DashboardScreen.kt` | Done — real Room data via DashboardViewModel |
+| Camera | `ui/camera/CameraScreen.kt` | Done — CameraX, captures photo, calls CameraViewModel.scanImage() |
+| Scan Result | `ui/camera/ScanResultSheet.kt` | Done — shows real ScanResponse, allergen warnings, confidence |
+| History | `ui/history/HistoryScreen.kt` | Done — 7-day Room data, weekly Vico chart |
+| Profile | `ui/profile/ProfileScreen.kt` | Done — reads/writes DataStore + API |
+| Meal Detail | `ui/meal/MealDetailScreen.kt` | Done — single meal from Room via MealDetailViewModel |
 
-### ViewModels (all new)
-| ViewModel | Description |
+### ViewModels
+| ViewModel | Key Details |
 |-----------|-------------|
-| `DashboardViewModel` | Room meals+goals for today, delete (local+remote), refresh |
-| `HistoryViewModel` | 7-day Room range, weekly calorie chart, pull-to-refresh syncs from API |
-| `ProfileViewModel` | DataStore for goals/allergies, syncs from API on open, saves to API |
-| `CameraViewModel` | Image compress (target 500KB) → **3-step scan flow** (get upload URL → PUT to S3 → trigger scan) → ScanResponse → log meal. **Needs refactor** — see Pending §2 |
-| `MealDetailViewModel` | Single meal by local ID from Room, delete (local+remote) |
+| `DashboardViewModel` | Room meals+goals for today; nested combine (6 flows); delete local+remote |
+| `HistoryViewModel` | 7-day Room range; weekly chart; pull-to-refresh syncs from API |
+| `ProfileViewModel` | DataStore goals/allergies; syncs from API on open; saves to API |
+| `CameraViewModel` | Compress → get presigned URL → PUT to S3 (dedicated s3Client, no auth) → triggerScan → ScanResponse |
+| `MealDetailViewModel` | Single meal by local ID (SavedStateHandle); delete local+remote |
 
 ### Data Layer
 | File | Description |
 |------|-------------|
-| `data/local/entity/MealEntity.kt` | **v2** — added remoteId (UUID), imageKey (S3), mealTime, allergenWarnings |
-| `data/local/dao/MealDao.kt` | **Updated** — getMealByIdOnce(), getMealByRemoteId(), deleteById(), getUnsyncedMeals() |
-| `data/local/CaltrackDatabase.kt` | **v2** — MIGRATION_1_2 adds remoteId/imageKey/mealTime/allergenWarnings columns |
-| `data/local/UserPreferencesStore.kt` | **New** — DataStore for auth token, user name/email, goals, allergies |
-| `data/remote/ApiModels.kt` | **Updated** — matches backend contract exactly (UUID ids, ScanItems, ErrorDetail, user models) |
-| `data/remote/CaltrackApi.kt` | **Updated** — all endpoints: meals CRUD, weekly, user profile/goals/allergies |
-| `data/remote/AuthTokenInterceptor.kt` | **New** — OkHttp interceptor reads token from DataStore, adds Authorization header |
-| `data/repository/MealRepository.kt` | **Updated** — logMealRemote, deleteMealRemote, syncMealsForDate, getMealByLocalId |
-| `data/repository/UserRepository.kt` | **New** — profile, goals, allergies CRUD via Retrofit |
-| `di/AppModule.kt` | **Updated** — AuthTokenInterceptor added, migration added, longer timeouts (60s) |
+| `data/local/entity/MealEntity.kt` | v2 — added `remoteId` (UUID), `imageKey` (S3 key), `mealTime`, `allergenWarnings` |
+| `data/local/dao/MealDao.kt` | Added: `getMealByIdOnce()` (suspend), `getMealByRemoteId()`, `deleteById()`, `getUnsyncedMeals()` |
+| `data/local/CaltrackDatabase.kt` | v2 — `MIGRATION_1_2` adds all 4 new columns via ALTER TABLE |
+| `data/local/UserPreferencesStore.kt` | NEW — DataStore: auth_token, user_name, user_email, goals, allergies |
+| `data/remote/ApiModels.kt` | Matches backend contract exactly — UUID ids, Double macros, ErrorDetail, UploadUrlResponse, ScanRequest, full user models |
+| `data/remote/CaltrackApi.kt` | All endpoints: scan (2-step), meals CRUD, user profile/goals/allergies |
+| `data/remote/AuthTokenInterceptor.kt` | NEW — reads token via `runBlocking { prefsStore.authToken.firstOrNull() }` |
+| `data/repository/MealRepository.kt` | getScanUploadUrl(), triggerScan(), logMeal, delete, sync, getMealByLocalId |
+| `data/repository/UserRepository.kt` | NEW — profile, goals, allergies CRUD; `safeCall` helper |
+| `di/AppModule.kt` | AuthTokenInterceptor added; MIGRATION_1_2 added; 60s timeouts; BASE_URL = `http://10.0.2.2:8098/` |
 
 ### Navigation
-- `NavHost.kt` — **Updated** — Camera route uses CameraViewModel. Full scan flow: capture → Scanning overlay → ScanResultSheet → LoggingMeal overlay → navigate to Dashboard.
-- MealDetailRoute no longer passes `mealId` param (SavedStateHandle used by VM)
+- `NavHost.kt` — Camera route uses `hiltViewModel<CameraViewModel>()`; `LaunchedEffect(scanState)` navigates to Dashboard on `MealLogged`; Scanning/LoggingMeal overlays with `CircularProgressIndicator`
+- MealDetail uses `SavedStateHandle` for `mealId` — no param passing in NavHost
 
 ### Auth / DataStore
-- `UserPreferencesStore` stores JWT token (empty until Cognito is wired)
+- `UserPreferencesStore` stores JWT token (blank until Cognito wired)
 - `AuthTokenInterceptor` adds `Authorization: Bearer <token>` to all requests
-- API calls fail with 401 gracefully when token is absent (offline-first Room data shows)
-- Login "Skip for now" → no token → API calls fail silently, Room data used
+- API calls fail with 401 gracefully — Room data still displays (offline-first)
+- "Skip for now" on Login → no token → silent API failures → Room data used
+
+### Security
+- `.gitignore` — blocks `android/local.properties`, `android/.gradle/`, `android/app/build/`, `.env*`, keystores, `application-local.properties`
+- `.gitleaks.toml` — secret scanning config; allowlist for `${ENV_VAR}`, `.claude/agents/` (Figma file keys)
+- `.git-hooks/pre-commit` — runs `gitleaks protect --staged --verbose --redact` before every commit
+- `gitleaks` installed via Homebrew; hook copied to `.git/hooks/pre-commit`
+
+### Git
+- Repo: `https://github.com/Abhishek00018/foodlens`
+- Branch: `main`
+- Commit: `18de2f2` — "feat(android): initial commit — full Android app with offline-first architecture"
+- 62 files, 6164 insertions
 
 ---
 
-## What's PENDING (Android)
+## What's PENDING (Android) — Next Session Priority Order
 
-### 1. Auth Integration (Cognito) — PRIORITY
-- Replace dummy login with real AWS Cognito SDK
-- Google Sign-In flow
+### 1. ⚡ Auth Integration (Cognito) — HIGHEST PRIORITY
+- Replace dummy `LoginScreen` with real AWS Cognito SDK
+- Google Sign-In via Cognito Hosted UI or `aws-android-sdk-cognitoidentityprovider`
 - Email/password signup + signin
-- Store JWT via `UserPreferencesStore.saveAuthToken()`
-- Token refresh logic
+- On success: `UserPreferencesStore.saveAuthToken(idToken)`, `saveUserName()`, `saveUserEmail()`
+- Token refresh — Cognito SDK handles this; store refreshed token back to DataStore
+- Logout: `UserPreferencesStore.clearAll()`, navigate to Login
 
-### 2. Scan Flow Refactor — DONE ✅
-- `CaltrackApi.kt` — multipart removed; `getScanUploadUrl()` + `triggerScan()` added
-- `ApiModels.kt` — `UploadUrlResponse`, `ScanRequest` added; `imageUrl` added to `MealResponse` + `ScanResponse`
-- `CameraViewModel.scanImage()` — 3-step flow implemented with dedicated `s3Client` (no auth header)
-- `MealRepository` — `getScanUploadUrl()` + `triggerScan()` wired
+### 2. WorkManager Offline Sync
+- `MealDao.getUnsyncedMeals()` exists (returns `List<MealEntity>` where `remoteId == null`)
+- Create `SyncWorker` that loops through unsynced meals and calls `MealRepository.logMealRemote()`
+- Register as `NetworkType.CONNECTED` constraint worker on app start
 
-### 3. Image Display for Logged Meals
-- ScanResultSheet already shows `localImageUri` for local preview (no change needed)
-- `imageKey` from ScanResponse is stored in Room (no change needed)
-- For displaying images in MealDetail/History: backend can return presigned GET URL inline,
-  or Android can call a future endpoint. Defer until needed.
+### 3. Error Handling Polish
+- Shimmer skeleton screens during initial load
+- Retry buttons on error states (Dashboard, History)
+- No-network banner (observe `ConnectivityManager` Flow)
 
-### 3. Offline-First Sync
-- `MealRepository.getUnsyncedMeals()` exists but no background WorkManager job yet
-- Add WorkManager sync job that runs on connectivity restored
-
-### 4. Error Handling improvements
-- Shimmer skeleton screens for initial load
-- Retry buttons on error states
-- No-network banner
+### 4. Image Display for Old Meals
+- `imageKey` stored in Room — backend can return presigned GET URL inline in `MealResponse.imageUrl`
+- MealDetail + History cards: load `imageUri` (Coil) — will show placeholder for expired URLs
+- Long-term: either fetch fresh presigned URL on demand, or add `GET /api/user/presigned-url?key=` endpoint
 
 ### 5. Onboarding Flow
-- First-launch: set name, goals, allergies before Dashboard
+- First-launch: detect no auth token → show onboarding (name, goals, allergies) before Dashboard
 
 ### 6. Testing
 - No tests written yet
+- Unit tests: ViewModels (mock repositories), Repository (mock API + DAO)
+- UI tests: Compose test rules for Dashboard, Camera flow
 
 ---
 
 ## What Android EXPECTS from Backend
 
-### BREAKING CHANGE: Scan flow is now 3 steps (no more multipart upload to backend)
-
-**Old flow (removed):**
-```
-POST /api/meals/scan   multipart image → ScanResponse
-```
-
-**New flow:**
+### Scan Flow (3-step — BREAKING CHANGE from multipart)
 ```
 Step 1: GET  /api/meals/scan/upload-url?contentType=image/jpeg  → UploadUrlResponse
-Step 2: PUT  <uploadUrl>  (direct to S3, raw bytes, Content-Type header required)
+Step 2: PUT  <uploadUrl>  (direct to S3, raw bytes — Android handles this, NOT via backend)
 Step 3: POST /api/meals/scan  { imageKey, contentType }          → ScanResponse
 ```
 
-### New API Models needed in `ApiModels.kt`
+### Key Expectations
+- **Base URL (local dev):** `http://10.0.2.2:8098/` ← emulator → host, port 8098 (application-local.properties)
+- **Base URL (prod):** TBD (EC2)
+- All responses wrapped: `{ "status": "success", "data": {...} }` or `{ "status": "error", "error": { "code": "...", "message": "..." } }`
+- JWT via `Authorization: Bearer <token>` (currently absent in dev — API returns 401, Room data shown)
+- Dates as ISO strings: `"2026-04-24"`
+- UUIDs as strings
+- Null fields omitted (Jackson NON_NULL)
+- Macros as `Double` in JSON (`42.0`)
+
+### Full Retrofit Interface (CaltrackApi.kt)
 ```kotlin
-data class UploadUrlResponse(
-    val uploadUrl: String,   // presigned S3 PUT URL, expires in expiresInSeconds
-    val imageKey: String,    // use this key in ScanRequest
-    val expiresInSeconds: Int
-)
-
-data class ScanRequest(
-    val imageKey: String,
-    val contentType: String? = "image/jpeg"
-)
-```
-
-### Updated Retrofit Interface (`CaltrackApi.kt`)
-Replace the old `scanMealImage` with:
-```kotlin
-// Step 1 — get upload URL (rate limited: 10/min)
-@GET("api/meals/scan/upload-url")
-suspend fun getScanUploadUrl(
-    @Query("contentType") contentType: String = "image/jpeg"
-): Response<ApiEnvelope<UploadUrlResponse>>
-
-// Step 3 — trigger analysis after S3 upload (rate limited: 10/min)
-@POST("api/meals/scan")
-suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanResponse>>
-
-// Remove this — no longer exists:
-// @Multipart @POST("api/meals/scan") suspend fun scanMealImage(...)
-```
-
-### Step 2 — Direct S3 PUT (NOT via Retrofit, use OkHttp directly)
-S3 presigned PUT requires a raw HTTP PUT with the exact `Content-Type` header. Do NOT use Retrofit for this call.
-```kotlin
-// In CameraViewModel or a dedicated S3UploadService:
-suspend fun uploadToS3(uploadUrl: String, imageBytes: ByteArray, contentType: String) {
-    val client = OkHttpClient()
-    val body = imageBytes.toRequestBody(contentType.toMediaType())
-    val request = Request.Builder()
-        .url(uploadUrl)
-        .put(body)
-        .header("Content-Type", contentType)
-        .build()
-    val response = client.newCall(request).execute()
-    if (!response.isSuccessful) throw IOException("S3 upload failed: ${response.code}")
-}
-```
-
-### Updated `CameraViewModel` scan flow
-Replace `scanImage()` to follow the 3-step flow:
-```
-1. Compress captured image (existing logic, target 500KB)
-2. Call getScanUploadUrl(contentType = "image/jpeg") → get uploadUrl + imageKey
-3. PUT image bytes directly to uploadUrl (OkHttp, see above)
-4. Call triggerScan(ScanRequest(imageKey, "image/jpeg")) → ScanResponse
-5. Show result in ScanResultSheet (unchanged)
-```
-
-### Image handling in `Section 2 — What's PENDING`
-The existing "Image Handling for S3" pending item is now partially resolved:
-- `imageKey` from ScanResponse is still stored in Room (unchanged)
-- For displaying previously-logged meal images: call `GET /api/user/presigned-url?key=<imageKey>` (not yet implemented — backend can add this endpoint if needed) OR use the existing S3 presigned download URL pattern
-
-### Retrofit Interface (full — all endpoints)
-```kotlin
-// Scan (new 2-endpoint pattern)
+// Scan
 @GET("api/meals/scan/upload-url")
 suspend fun getScanUploadUrl(@Query("contentType") contentType: String = "image/jpeg"): Response<ApiEnvelope<UploadUrlResponse>>
 
 @POST("api/meals/scan")
 suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanResponse>>
 
-// Meals (unchanged)
+// Meals CRUD
 @POST("api/meals") suspend fun logMeal(@Body meal: MealRequest): Response<ApiEnvelope<MealResponse>>
 @GET("api/meals") suspend fun getMealsByDate(@Query("date") date: String): Response<ApiEnvelope<List<MealResponse>>>
 @GET("api/meals/{id}") suspend fun getMealById(@Path("id") id: String): Response<ApiEnvelope<MealResponse>>
@@ -194,7 +154,7 @@ suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanRe
 @DELETE("api/meals/{id}") suspend fun deleteMeal(@Path("id") id: String): Response<ApiEnvelope<Unit>>
 @GET("api/meals/weekly") suspend fun getWeeklySummary(): Response<ApiEnvelope<WeeklyResponse>>
 
-// User (unchanged)
+// User
 @GET("api/user/profile") suspend fun getProfile(): Response<ApiEnvelope<ProfileResponse>>
 @PUT("api/user/profile") suspend fun updateProfile(@Body request: ProfileRequest): Response<ApiEnvelope<ProfileResponse>>
 @GET("api/user/goals") suspend fun getGoals(): Response<ApiEnvelope<GoalResponse>>
@@ -203,19 +163,34 @@ suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanRe
 @PUT("api/user/allergies") suspend fun updateAllergies(@Body request: AllergyRequest): Response<ApiEnvelope<AllergyResponse>>
 ```
 
-### Key Expectations
-- Base URL: `http://10.0.2.2:8080/` (emulator → host localhost)  
-  ⚠️ **Local dev port is `8098`** (overridden in `application-local.properties`) — update `AppModule.kt` if needed
-- All responses wrapped in `ApiEnvelope<T>` { status, data, error: {code, message} }
-- JWT passed via `Authorization: Bearer <token>` header
-- **Image upload goes directly to S3 (NOT to backend)** — see new scan flow above
-- Dates as ISO strings: `"2026-04-11"`
-- UUIDs as strings
-- Null fields omitted (Jackson NON_NULL)
+### ScanResponse — required fields
+```json
+{
+  "foodName": "Grilled Chicken Salad",
+  "calories": 580,
+  "protein": 42.0,
+  "carbs": 18.0,
+  "fat": 22.0,
+  "confidence": 0.92,
+  "items": [{ "name": "...", "calories": 200, "protein": 15.0, "carbs": 5.0, "fat": 8.0, "weightGrams": 150 }],
+  "allergenWarnings": ["Dairy"],
+  "imageKey": "meals/uuid-here.jpg",
+  "imageUrl": "https://s3.amazonaws.com/...?X-Amz-...",
+  "notes": "..."
+}
+```
+
+### DELETE /api/meals/{id}
+Must return `200 { "status": "success", "data": null }` — NOT 204 No Content.
+
+### GET /api/meals/weekly
+```json
+{ "status": "success", "data": { "days": [{ "date": "2026-04-18", "totalCalories": 1850.0 }, ...] } }
+```
 
 ---
 
-## Shared Constants (must match between Android & Backend)
+## Shared Constants
 | Constant | Value |
 |----------|-------|
 | Max image size | 10MB |
@@ -227,3 +202,4 @@ suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanRe
 | Allergens list | Lactose, Gluten, Peanuts, Tree Nuts, Shellfish, Soy, Eggs, Fish, Sesame, Wheat |
 | Low confidence threshold | 0.6 |
 | Rate limit (scan) | 10 requests/minute |
+| Backend local port | 8098 |
