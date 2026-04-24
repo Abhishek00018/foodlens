@@ -41,6 +41,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.caltrack.app.ui.auth.LoginScreen
+import com.caltrack.app.ui.auth.StartupViewModel
 import com.caltrack.app.ui.camera.CameraScreen
 import com.caltrack.app.ui.camera.CameraViewModel
 import com.caltrack.app.ui.camera.ScanResultSheet
@@ -48,6 +49,7 @@ import com.caltrack.app.ui.camera.ScanUiState
 import com.caltrack.app.ui.dashboard.DashboardScreen
 import com.caltrack.app.ui.history.HistoryScreen
 import com.caltrack.app.ui.meal.MealDetailScreen
+import com.caltrack.app.ui.onboarding.OnboardingScreen
 import com.caltrack.app.ui.profile.ProfileScreen
 import com.caltrack.app.ui.theme.DarkSurface
 import com.caltrack.app.ui.theme.NeonLime
@@ -55,6 +57,7 @@ import com.caltrack.app.ui.theme.TextSecondary
 import kotlinx.serialization.Serializable
 
 @Serializable object LoginRoute
+@Serializable object OnboardingRoute
 @Serializable object DashboardRoute
 @Serializable object CameraRoute
 @Serializable object HistoryRoute
@@ -71,6 +74,22 @@ private const val ANIM_DURATION = 350
 
 @Composable
 fun CaltrackNavHost() {
+    val startupViewModel: StartupViewModel = hiltViewModel()
+    val startDest by startupViewModel.startDestination.collectAsStateWithLifecycle()
+
+    // Show splash until start destination is determined
+    if (startDest == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = NeonLime)
+        }
+        return
+    }
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -122,15 +141,26 @@ fun CaltrackNavHost() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = LoginRoute,
+            startDestination = startDest!!,
             modifier = Modifier.padding(innerPadding)
         ) {
             // Login
             composable<LoginRoute> {
                 LoginScreen(
                     onLoginSuccess = {
-                        navController.navigate(DashboardRoute) {
+                        navController.navigate(OnboardingRoute) {
                             popUpTo(LoginRoute) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            // Onboarding
+            composable<OnboardingRoute> {
+                OnboardingScreen(
+                    onComplete = {
+                        navController.navigate(DashboardRoute) {
+                            popUpTo(OnboardingRoute) { inclusive = true }
                         }
                     }
                 )
@@ -210,15 +240,6 @@ fun CaltrackNavHost() {
 
                 // Scan result bottom sheet
                 if (scanState is ScanUiState.Success || scanState is ScanUiState.LoggingMeal) {
-                    val successState = when (val s = scanState) {
-                        is ScanUiState.Success -> s
-                        is ScanUiState.LoggingMeal -> {
-                            // Keep showing the last success data while logging
-                            null
-                        }
-                        else -> null
-                    }
-                    // We only have ScanResponse in Success state — safe to show sheet
                     if (scanState is ScanUiState.Success) {
                         val s = scanState as ScanUiState.Success
                         ScanResultSheet(
@@ -232,7 +253,6 @@ fun CaltrackNavHost() {
                             onDismiss = { cameraViewModel.reset() }
                         )
                     } else if (scanState is ScanUiState.LoggingMeal) {
-                        // Show sheet in loading state (no dismiss while logging)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()

@@ -1,6 +1,6 @@
 # Caltrack Android — Status & Integration Contract
 
-> **Last updated:** 2026-04-24
+> **Last updated:** 2026-04-24 (Phase 3 complete)
 > **Location:** `/Users/abhisheksharma/Caltrack/android/`
 > **Repo:** `https://github.com/Abhishek00018/foodlens` (branch: `main`)
 > **Stack:** Kotlin, Jetpack Compose, CameraX, Room, Hilt, Retrofit, Coil, Vico
@@ -9,7 +9,7 @@
 
 ## Build Status: COMPILES ✅ | Git: PUSHED ✅
 
-Last build: `assembleDebug` passed. All 62 source files committed and pushed to GitHub.
+Last build: `assembleDebug` passed. Phase 3 complete — all 48 source files across 3 phases committed and pushed.
 
 ---
 
@@ -19,7 +19,7 @@ Last build: `assembleDebug` passed. All 62 source files committed and pushed to 
 |-------|------|--------|
 | 1 | Wire all screens to real ViewModels (no hardcoded data) | ✅ DONE |
 | 2 | Replace multipart scan with 3-step S3 flow | ✅ DONE |
-| 3 | Auth (Cognito), WorkManager sync, error polish, onboarding | ⏳ PENDING |
+| 3 | Auth (Cognito), WorkManager sync, error polish, onboarding | ✅ DONE |
 
 ---
 
@@ -83,38 +83,77 @@ Last build: `assembleDebug` passed. All 62 source files committed and pushed to 
 
 ---
 
+## What's DONE (Phase 3 additions)
+
+### Auth (Cognito via direct REST API)
+| File | Description |
+|------|-------------|
+| `data/remote/CognitoService.kt` | OkHttp client calling Cognito REST: SignUp, ConfirmSignUp, InitiateAuth (USER_PASSWORD_AUTH + REFRESH_TOKEN_AUTH), GlobalSignOut |
+| `data/repository/AuthRepository.kt` | Orchestrates Cognito calls, saves idToken/accessToken/refreshToken to DataStore, exposes `isDevMode()` / `isLoggedIn()` |
+| `ui/auth/AuthUiState.kt` | Sealed class: Idle, Loading, SignedIn, NeedsConfirmation(email), Error |
+| `ui/auth/LoginViewModel.kt` | @HiltViewModel: signIn, signUp, confirmSignUp, skipLogin (dev mode only), clearError. Checks isLoggedIn() on init. |
+| `ui/auth/StartupViewModel.kt` | Combines authToken + userName flows → emits LoginRoute / OnboardingRoute / DashboardRoute |
+| `ui/auth/LoginScreen.kt` | Wired to LoginViewModel: real auth flow, email confirmation screen, LinearProgressIndicator, error display, Hosted UI for Google, dev-only skip |
+| `data/local/UserPreferencesStore.kt` | Added KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, accessToken/refreshToken flows, saveTokens() |
+
+### Cognito config (local.properties — gitignored)
+Keys needed when Cognito is set up:
+```
+COGNITO_CLIENT_ID=<your-app-client-id>
+COGNITO_REGION=ap-south-1
+COGNITO_HOSTED_DOMAIN=<your-domain>.auth.ap-south-1.amazoncognito.com
+COGNITO_REDIRECT_URI=caltrack://callback
+```
+When `COGNITO_CLIENT_ID` is empty → dev mode (skip auth works, real Cognito calls return error gracefully).
+
+### WorkManager Offline Sync
+| File | Description |
+|------|-------------|
+| `sync/SyncWorker.kt` | @HiltWorker: fetches unsynced meals, calls logMealRemote(), retries on failure |
+| `CaltrackApp.kt` | Implements Configuration.Provider, injects HiltWorkerFactory, schedules SyncWorker (every 15min, CONNECTED constraint) |
+| `data/repository/MealRepository.kt` | Added getUnsyncedMeals() |
+| `di/AppModule.kt` | Provides WorkManager, CognitoService, AuthRepository |
+
+### Error Handling Polish
+| File | Description |
+|------|-------------|
+| `ui/components/ShimmerBox.kt` | ShimmerBox, ShimmerMealCard (72dp), ShimmerProgressCard (240dp) — InfiniteTransition + linearGradient |
+| `ui/components/NetworkBanner.kt` | Animated offline banner using ConnectivityManager.NetworkCallback via produceState |
+| `ui/dashboard/DashboardScreen.kt` | Replaced CircularProgressIndicator with shimmer skeletons, NetworkBanner at top, error+Retry state |
+
+### Onboarding Flow
+| File | Description |
+|------|-------------|
+| `ui/onboarding/OnboardingViewModel.kt` | 3-page state machine (Welcome/Goals/Allergies), saves to DataStore + best-effort API sync |
+| `ui/onboarding/OnboardingScreen.kt` | AnimatedContent page transitions, goal sliders, allergen FilterChip grid |
+| `ui/NavHost.kt` | StartupViewModel routes to Login/Onboarding/Dashboard; OnboardingRoute added |
+
+### Navigation routing (StartupViewModel)
+- `authToken == null` → LoginRoute
+- `authToken != null && userName == null` → OnboardingRoute  
+- Both set → DashboardRoute
+- StartDestination shows loading spinner until flows emit
+
+---
+
 ## What's PENDING (Android) — Next Session Priority Order
 
-### 1. ⚡ Auth Integration (Cognito) — HIGHEST PRIORITY
-- Replace dummy `LoginScreen` with real AWS Cognito SDK
-- Google Sign-In via Cognito Hosted UI or `aws-android-sdk-cognitoidentityprovider`
-- Email/password signup + signin
-- On success: `UserPreferencesStore.saveAuthToken(idToken)`, `saveUserName()`, `saveUserEmail()`
-- Token refresh — Cognito SDK handles this; store refreshed token back to DataStore
-- Logout: `UserPreferencesStore.clearAll()`, navigate to Login
-
-### 2. WorkManager Offline Sync
-- `MealDao.getUnsyncedMeals()` exists (returns `List<MealEntity>` where `remoteId == null`)
-- Create `SyncWorker` that loops through unsynced meals and calls `MealRepository.logMealRemote()`
-- Register as `NetworkType.CONNECTED` constraint worker on app start
-
-### 3. Error Handling Polish
-- Shimmer skeleton screens during initial load
-- Retry buttons on error states (Dashboard, History)
-- No-network banner (observe `ConnectivityManager` Flow)
-
-### 4. Image Display for Old Meals
-- `imageKey` stored in Room — backend can return presigned GET URL inline in `MealResponse.imageUrl`
-- MealDetail + History cards: load `imageUri` (Coil) — will show placeholder for expired URLs
-- Long-term: either fetch fresh presigned URL on demand, or add `GET /api/user/presigned-url?key=` endpoint
-
-### 5. Onboarding Flow
-- First-launch: detect no auth token → show onboarding (name, goals, allergies) before Dashboard
-
-### 6. Testing
+### 1. Testing
 - No tests written yet
 - Unit tests: ViewModels (mock repositories), Repository (mock API + DAO)
 - UI tests: Compose test rules for Dashboard, Camera flow
+
+### 2. Image Display for Old Meals
+- `imageKey` stored in Room — backend can return presigned GET URL inline in `MealResponse.imageUrl`
+- MealDetail + History cards: load `imageUri` (Coil) — will show placeholder for expired URLs
+- Long-term: either fetch fresh presigned URL on demand
+
+### 3. History screen error polish
+- History screen still uses CircularProgressIndicator — should get shimmer + retry button same as Dashboard
+
+### 4. Token refresh automation
+- `AuthRepository.refreshTokens()` exists but isn't wired into an OkHttp Authenticator
+- Add an `Authenticator` that auto-calls `refreshTokens()` on 401 responses
 
 ---
 

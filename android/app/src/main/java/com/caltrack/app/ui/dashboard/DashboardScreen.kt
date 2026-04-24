@@ -19,11 +19,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -42,6 +44,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caltrack.app.ui.components.CalorieProgressRing
 import com.caltrack.app.ui.components.MealItem
+import com.caltrack.app.ui.components.NetworkBanner
+import com.caltrack.app.ui.components.ShimmerMealCard
+import com.caltrack.app.ui.components.ShimmerProgressCard
 import com.caltrack.app.ui.components.SwipeableMealCard
 import com.caltrack.app.ui.theme.DarkSurface
 import com.caltrack.app.ui.theme.NeonLime
@@ -63,10 +68,38 @@ fun DashboardScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (uiState.isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = NeonLime
-            )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item { Spacer(modifier = Modifier.height(16.dp)) }
+                item { ShimmerProgressCard() }
+                items(3) { ShimmerMealCard() }
+                item { Spacer(modifier = Modifier.height(80.dp)) }
+            }
+        } else if (uiState.error != null && uiState.meals.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = uiState.error ?: "Something went wrong",
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { viewModel.refresh() },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, NeonLime)
+                ) {
+                    Text(text = "Retry", color = NeonLime)
+                }
+            }
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -234,6 +267,8 @@ fun DashboardScreen(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+
+        NetworkBanner(modifier = Modifier.align(Alignment.TopCenter))
     }
 }
 

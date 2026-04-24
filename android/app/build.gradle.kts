@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +7,11 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+val localProperties = Properties().also { props ->
+    val f = rootProject.file("local.properties")
+    if (f.exists()) props.load(f.inputStream())
 }
 
 android {
@@ -19,6 +26,11 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "COGNITO_CLIENT_ID", "\"${localProperties["COGNITO_CLIENT_ID"] ?: ""}\"")
+        buildConfigField("String", "COGNITO_REGION", "\"${localProperties["COGNITO_REGION"] ?: "us-east-1"}\"")
+        buildConfigField("String", "COGNITO_HOSTED_DOMAIN", "\"${localProperties["COGNITO_HOSTED_DOMAIN"] ?: ""}\"")
+        buildConfigField("String", "COGNITO_REDIRECT_URI", "\"${localProperties["COGNITO_REDIRECT_URI"] ?: "caltrack://callback"}\"")
     }
 
     buildTypes {
@@ -43,6 +55,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -95,6 +108,14 @@ dependencies {
 
     // DataStore (preferences)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // Browser (Cognito Hosted UI)
+    implementation("androidx.browser:browser:1.8.0")
+
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.hilt:hilt-work:1.2.0")
+    ksp("androidx.hilt:hilt-compiler:1.2.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

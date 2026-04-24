@@ -58,6 +58,8 @@ class MealRepository @Inject constructor(
     suspend fun updateGoal(goal: DailyGoalEntity) =
         dailyGoalDao.update(goal)
 
+    suspend fun getUnsyncedMeals(): List<MealEntity> = mealDao.getUnsyncedMeals()
+
     // ─── Scan: Step 1 ─────────────────────────────────────────────────────────
 
     /**

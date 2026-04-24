@@ -28,9 +28,15 @@ class UserPreferencesStore @Inject constructor(
         val KEY_CARBS_GOAL = intPreferencesKey("carbs_goal")
         val KEY_FAT_GOAL = intPreferencesKey("fat_goal")
         val KEY_ALLERGIES = stringPreferencesKey("allergies") // comma-separated
+        val KEY_ACCESS_TOKEN = stringPreferencesKey("access_token")
+        val KEY_REFRESH_TOKEN = stringPreferencesKey("refresh_token")
     }
 
     val authToken: Flow<String?> = context.dataStore.data.map { it[KEY_AUTH_TOKEN] }
+
+    val accessToken: Flow<String?> = context.dataStore.data.map { it[KEY_ACCESS_TOKEN] }
+
+    val refreshToken: Flow<String?> = context.dataStore.data.map { it[KEY_REFRESH_TOKEN] }
 
     val userName: Flow<String?> = context.dataStore.data.map { it[KEY_USER_NAME] }
 
@@ -75,6 +81,14 @@ class UserPreferencesStore @Inject constructor(
 
     suspend fun saveAllergies(allergies: List<String>) {
         context.dataStore.edit { it[KEY_ALLERGIES] = allergies.joinToString(",") }
+    }
+
+    suspend fun saveTokens(idToken: String, accessToken: String, refreshToken: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_AUTH_TOKEN] = idToken
+            prefs[KEY_ACCESS_TOKEN] = accessToken
+            prefs[KEY_REFRESH_TOKEN] = refreshToken
+        }
     }
 
     suspend fun clearAll() {

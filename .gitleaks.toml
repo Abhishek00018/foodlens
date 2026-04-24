@@ -49,4 +49,6 @@ paths = [
     '''\.env\.template''',
     # Claude agent config — contains Figma file keys (not secrets)
     '''\.claude/agents/''',
+    # Session context docs — contain example commands with placeholder values, not real secrets
+    '''\.claude/context/''',
 ]

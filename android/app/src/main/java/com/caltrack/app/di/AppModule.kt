@@ -2,11 +2,15 @@ package com.caltrack.app.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.work.WorkManager
 import com.caltrack.app.data.local.CaltrackDatabase
+import com.caltrack.app.data.local.UserPreferencesStore
 import com.caltrack.app.data.local.dao.DailyGoalDao
 import com.caltrack.app.data.local.dao.MealDao
 import com.caltrack.app.data.remote.AuthTokenInterceptor
 import com.caltrack.app.data.remote.CaltrackApi
+import com.caltrack.app.data.remote.CognitoService
+import com.caltrack.app.data.repository.AuthRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -74,4 +78,20 @@ object AppModule {
     @Singleton
     fun provideCaltrackApi(retrofit: Retrofit): CaltrackApi =
         retrofit.create(CaltrackApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideCognitoService(): CognitoService = CognitoService()
+
+    @Provides
+    @Singleton
+    fun provideAuthRepository(
+        cognitoService: CognitoService,
+        prefsStore: UserPreferencesStore
+    ): AuthRepository = AuthRepository(cognitoService, prefsStore)
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager =
+        WorkManager.getInstance(context)
 }
