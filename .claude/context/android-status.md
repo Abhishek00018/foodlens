@@ -9,11 +9,12 @@
 
 ## Build Status: COMPILES ✅ | Git: PUSHED ✅
 
-Last build: `assembleDebug` passed. Phase 3 complete — all 48 source files across 3 phases committed and pushed.
+Last build: `assembleDebug` passed. All 3 phases complete and pushed.
+Latest commit: `2e8b01f` — "feat(android): Phase 3 — auth, WorkManager sync, shimmer polish, onboarding"
 
 ---
 
-## Original Plan (3 Phases)
+## All 3 Phases — Complete
 
 | Phase | Goal | Status |
 |-------|------|--------|
@@ -23,158 +24,161 @@ Last build: `assembleDebug` passed. Phase 3 complete — all 48 source files acr
 
 ---
 
-## What's DONE (Android)
+## All Screens
 
-### UI Screens — All wired to real ViewModels (no sample data)
-| Screen | File | Status |
-|--------|------|--------|
-| Login | `ui/auth/LoginScreen.kt` | Done — email/password + Google button + "Skip for now" dev mode. No real Cognito auth yet. |
-| Dashboard | `ui/dashboard/DashboardScreen.kt` | Done — real Room data via DashboardViewModel |
-| Camera | `ui/camera/CameraScreen.kt` | Done — CameraX, captures photo, calls CameraViewModel.scanImage() |
-| Scan Result | `ui/camera/ScanResultSheet.kt` | Done — shows real ScanResponse, allergen warnings, confidence |
-| History | `ui/history/HistoryScreen.kt` | Done — 7-day Room data, weekly Vico chart |
-| Profile | `ui/profile/ProfileScreen.kt` | Done — reads/writes DataStore + API |
-| Meal Detail | `ui/meal/MealDetailScreen.kt` | Done — single meal from Room via MealDetailViewModel |
-
-### ViewModels
-| ViewModel | Key Details |
-|-----------|-------------|
-| `DashboardViewModel` | Room meals+goals for today; nested combine (6 flows); delete local+remote |
-| `HistoryViewModel` | 7-day Room range; weekly chart; pull-to-refresh syncs from API |
-| `ProfileViewModel` | DataStore goals/allergies; syncs from API on open; saves to API |
-| `CameraViewModel` | Compress → get presigned URL → PUT to S3 (dedicated s3Client, no auth) → triggerScan → ScanResponse |
-| `MealDetailViewModel` | Single meal by local ID (SavedStateHandle); delete local+remote |
-
-### Data Layer
-| File | Description |
-|------|-------------|
-| `data/local/entity/MealEntity.kt` | v2 — added `remoteId` (UUID), `imageKey` (S3 key), `mealTime`, `allergenWarnings` |
-| `data/local/dao/MealDao.kt` | Added: `getMealByIdOnce()` (suspend), `getMealByRemoteId()`, `deleteById()`, `getUnsyncedMeals()` |
-| `data/local/CaltrackDatabase.kt` | v2 — `MIGRATION_1_2` adds all 4 new columns via ALTER TABLE |
-| `data/local/UserPreferencesStore.kt` | NEW — DataStore: auth_token, user_name, user_email, goals, allergies |
-| `data/remote/ApiModels.kt` | Matches backend contract exactly — UUID ids, Double macros, ErrorDetail, UploadUrlResponse, ScanRequest, full user models |
-| `data/remote/CaltrackApi.kt` | All endpoints: scan (2-step), meals CRUD, user profile/goals/allergies |
-| `data/remote/AuthTokenInterceptor.kt` | NEW — reads token via `runBlocking { prefsStore.authToken.firstOrNull() }` |
-| `data/repository/MealRepository.kt` | getScanUploadUrl(), triggerScan(), logMeal, delete, sync, getMealByLocalId |
-| `data/repository/UserRepository.kt` | NEW — profile, goals, allergies CRUD; `safeCall` helper |
-| `di/AppModule.kt` | AuthTokenInterceptor added; MIGRATION_1_2 added; 60s timeouts; BASE_URL = `http://10.0.2.2:8098/` |
-
-### Navigation
-- `NavHost.kt` — Camera route uses `hiltViewModel<CameraViewModel>()`; `LaunchedEffect(scanState)` navigates to Dashboard on `MealLogged`; Scanning/LoggingMeal overlays with `CircularProgressIndicator`
-- MealDetail uses `SavedStateHandle` for `mealId` — no param passing in NavHost
-
-### Auth / DataStore
-- `UserPreferencesStore` stores JWT token (blank until Cognito wired)
-- `AuthTokenInterceptor` adds `Authorization: Bearer <token>` to all requests
-- API calls fail with 401 gracefully — Room data still displays (offline-first)
-- "Skip for now" on Login → no token → silent API failures → Room data used
-
-### Security
-- `.gitignore` — blocks `android/local.properties`, `android/.gradle/`, `android/app/build/`, `.env*`, keystores, `application-local.properties`
-- `.gitleaks.toml` — secret scanning config; allowlist for `${ENV_VAR}`, `.claude/agents/` (Figma file keys)
-- `.git-hooks/pre-commit` — runs `gitleaks protect --staged --verbose --redact` before every commit
-- `gitleaks` installed via Homebrew; hook copied to `.git/hooks/pre-commit`
-
-### Git
-- Repo: `https://github.com/Abhishek00018/foodlens`
-- Branch: `main`
-- Commit: `18de2f2` — "feat(android): initial commit — full Android app with offline-first architecture"
-- 62 files, 6164 insertions
+| Screen | File | Notes |
+|--------|------|-------|
+| Login | `ui/auth/LoginScreen.kt` | Wired to `LoginViewModel` — real Cognito sign-in/sign-up/confirm flow; Google via Hosted UI (Custom Tabs); dev-only skip when `COGNITO_CLIENT_ID` is blank |
+| Onboarding | `ui/onboarding/OnboardingScreen.kt` | 3-page flow: Welcome (name) → Goals (sliders) → Allergies (FilterChips); shown on first login |
+| Dashboard | `ui/dashboard/DashboardScreen.kt` | Room data via `DashboardViewModel`; shimmer skeleton loading; NetworkBanner; Retry on error |
+| Camera | `ui/camera/CameraScreen.kt` | CameraX capture → `CameraViewModel.scanImage()` → presigned S3 PUT → trigger scan |
+| Scan Result | `ui/camera/ScanResultSheet.kt` | Shows `ScanResponse`: food name, macros, confidence, allergen warnings |
+| History | `ui/history/HistoryScreen.kt` | 7-day Room range; weekly Vico chart; pull-to-refresh syncs from API |
+| Profile | `ui/profile/ProfileScreen.kt` | Reads/writes DataStore + API; logout clears DataStore and navigates to Login |
+| Meal Detail | `ui/meal/MealDetailScreen.kt` | Single meal from Room via `MealDetailViewModel`; delete local+remote |
 
 ---
 
-## What's DONE (Phase 3 additions)
+## ViewModels
 
-### Auth (Cognito via direct REST API)
+| ViewModel | Key Details |
+|-----------|-------------|
+| `StartupViewModel` | Combines `authToken` + `userName` flows → routes to `LoginRoute` / `OnboardingRoute` / `DashboardRoute` |
+| `LoginViewModel` | `signIn`, `signUp`, `confirmSignUp`, `skipLogin` (dev only), `clearError`; checks `isLoggedIn()` on init |
+| `OnboardingViewModel` | 3-page state machine; saves name/goals/allergies to DataStore + best-effort API sync on `complete()` |
+| `DashboardViewModel` | Room meals+goals for today; 6-flow combine; delete local+remote; `refresh()` |
+| `HistoryViewModel` | 7-day Room range; weekly chart data; pull-to-refresh syncs from API |
+| `ProfileViewModel` | DataStore goals/allergies; syncs from API on open; saves to API; `logout()` |
+| `CameraViewModel` | Compress → get presigned URL → PUT to S3 → `triggerScan()` → `ScanResponse` |
+| `MealDetailViewModel` | Single meal by local ID (`SavedStateHandle`); delete local+remote |
+
+---
+
+## Data Layer
+
+### Local (Room)
 | File | Description |
 |------|-------------|
-| `data/remote/CognitoService.kt` | OkHttp client calling Cognito REST: SignUp, ConfirmSignUp, InitiateAuth (USER_PASSWORD_AUTH + REFRESH_TOKEN_AUTH), GlobalSignOut |
-| `data/repository/AuthRepository.kt` | Orchestrates Cognito calls, saves idToken/accessToken/refreshToken to DataStore, exposes `isDevMode()` / `isLoggedIn()` |
-| `ui/auth/AuthUiState.kt` | Sealed class: Idle, Loading, SignedIn, NeedsConfirmation(email), Error |
-| `ui/auth/LoginViewModel.kt` | @HiltViewModel: signIn, signUp, confirmSignUp, skipLogin (dev mode only), clearError. Checks isLoggedIn() on init. |
-| `ui/auth/StartupViewModel.kt` | Combines authToken + userName flows → emits LoginRoute / OnboardingRoute / DashboardRoute |
-| `ui/auth/LoginScreen.kt` | Wired to LoginViewModel: real auth flow, email confirmation screen, LinearProgressIndicator, error display, Hosted UI for Google, dev-only skip |
-| `data/local/UserPreferencesStore.kt` | Added KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, accessToken/refreshToken flows, saveTokens() |
+| `data/local/entity/MealEntity.kt` | `remoteId` (UUID), `imageKey` (S3), `mealTime`, `allergenWarnings`, `synced` flag |
+| `data/local/dao/MealDao.kt` | Full CRUD + `getMealByRemoteId()`, `getUnsyncedMeals()`, `getMealByIdOnce()` |
+| `data/local/CaltrackDatabase.kt` | `MIGRATION_1_2` adds 4 new columns |
+| `data/local/entity/DailyGoalEntity.kt` | Calorie + macro goals stored locally |
+| `data/local/UserPreferencesStore.kt` | DataStore: `auth_token`, `access_token`, `refresh_token`, `user_name`, `user_email`, goals, allergies; `saveTokens()`, `clearAll()` |
 
-### Cognito config (local.properties — gitignored)
-Keys needed when Cognito is set up:
+### Remote
+| File | Description |
+|------|-------------|
+| `data/remote/ApiModels.kt` | Matches backend contract: UUID ids, Double macros, `ApiEnvelope<T>`, `UploadUrlResponse`, `ScanRequest/Response`, full user models |
+| `data/remote/CaltrackApi.kt` | All Retrofit endpoints (see API contract below) |
+| `data/remote/AuthTokenInterceptor.kt` | Reads `authToken` from DataStore via `runBlocking { prefsStore.authToken.firstOrNull() }`, adds `Authorization: Bearer` header |
+| `data/remote/CognitoService.kt` | OkHttp REST calls to Cognito: `SignUp`, `ConfirmSignUp`, `InitiateAuth` (USER_PASSWORD_AUTH + REFRESH_TOKEN_AUTH), `GlobalSignOut`; dev-mode guard when `COGNITO_CLIENT_ID` is blank |
+
+### Repositories
+| File | Description |
+|------|-------------|
+| `data/repository/AuthRepository.kt` | Wraps `CognitoService`; saves `idToken`/`accessToken`/`refreshToken` to DataStore; `isDevMode()`, `isLoggedIn()`, `signOut()` |
+| `data/repository/MealRepository.kt` | Scan 3-step flow; meals CRUD (local+remote); sync; `getUnsyncedMeals()` |
+| `data/repository/UserRepository.kt` | Profile, goals, allergies CRUD; `safeCall` helper |
+
+---
+
+## DI & Infrastructure
+
+| File | Description |
+|------|-------------|
+| `di/AppModule.kt` | Provides: Room DB + DAOs; OkHttp (with `AuthTokenInterceptor`, 60s timeouts); Retrofit; `CaltrackApi`; `CognitoService`; `AuthRepository`; `WorkManager` |
+| `di/RepositoryModule.kt` | Binds repository interfaces |
+| `CaltrackApp.kt` | `@HiltAndroidApp`; implements `Configuration.Provider`; injects `HiltWorkerFactory`; schedules `SyncWorker` on startup |
+| `sync/SyncWorker.kt` | `@HiltWorker`; `CoroutineWorker`; fetches unsynced meals → `logMealRemote()` per meal (best-effort); `Result.retry()` on failure; runs every 15 min with `CONNECTED` network constraint |
+
+---
+
+## UI Components
+
+| File | Description |
+|------|-------------|
+| `ui/components/ShimmerBox.kt` | `ShimmerBox`, `ShimmerMealCard` (72dp), `ShimmerProgressCard` (240dp) — `InfiniteTransition` + `linearGradient` |
+| `ui/components/NetworkBanner.kt` | Animated offline bar; `ConnectivityManager.NetworkCallback` via `produceState`; slides in/out |
+| `ui/components/CalorieProgressRing.kt` | Animated arc progress ring |
+| `ui/components/MealCard.kt` | Meal row with macros; swipeable |
+| `ui/components/WeeklyChart.kt` | Vico bar chart for 7-day history |
+
+---
+
+## Navigation
+
+`ui/NavHost.kt` — `CaltrackNavHost()`:
+- Startup: `StartupViewModel` emits `null` (loading) → `LoginRoute` / `OnboardingRoute` / `DashboardRoute`; shows `CircularProgressIndicator` until first emission
+- Routes: `LoginRoute`, `OnboardingRoute`, `DashboardRoute`, `CameraRoute`, `HistoryRoute`, `ProfileRoute`, `MealDetailRoute(mealId)`
+- Camera: `hiltViewModel<CameraViewModel>()`; `LaunchedEffect(scanState)` navigates to Dashboard on `MealLogged`
+- Profile logout: clears DataStore → `StartupViewModel` re-emits `LoginRoute` automatically
+
+---
+
+## Auth & Security
+
+### Cognito config (in `local.properties` — gitignored)
 ```
 COGNITO_CLIENT_ID=<your-app-client-id>
 COGNITO_REGION=ap-south-1
 COGNITO_HOSTED_DOMAIN=<your-domain>.auth.ap-south-1.amazoncognito.com
 COGNITO_REDIRECT_URI=caltrack://callback
 ```
-When `COGNITO_CLIENT_ID` is empty → dev mode (skip auth works, real Cognito calls return error gracefully).
+Read at build time via `BuildConfig` fields. When `COGNITO_CLIENT_ID` is empty → **dev mode**: "Skip for now" button is visible, `skipLogin()` stores a dummy token, all Cognito calls return an error gracefully.
 
-### WorkManager Offline Sync
-| File | Description |
-|------|-------------|
-| `sync/SyncWorker.kt` | @HiltWorker: fetches unsynced meals, calls logMealRemote(), retries on failure |
-| `CaltrackApp.kt` | Implements Configuration.Provider, injects HiltWorkerFactory, schedules SyncWorker (every 15min, CONNECTED constraint) |
-| `data/repository/MealRepository.kt` | Added getUnsyncedMeals() |
-| `di/AppModule.kt` | Provides WorkManager, CognitoService, AuthRepository |
+### Token flow
+1. `LoginViewModel.signIn()` → `CognitoService.signIn()` → `AuthRepository` saves `idToken` (auth_token), `accessToken`, `refreshToken` to DataStore
+2. `AuthTokenInterceptor` sends `idToken` as `Authorization: Bearer` on every backend request
+3. Backend validates against Cognito JWT; returns 401 if invalid → Room data still displayed (offline-first)
+4. Logout: `AuthRepository.signOut()` → `CognitoService.globalSignOut(accessToken)` + `UserPreferencesStore.clearAll()`
 
-### Error Handling Polish
-| File | Description |
-|------|-------------|
-| `ui/components/ShimmerBox.kt` | ShimmerBox, ShimmerMealCard (72dp), ShimmerProgressCard (240dp) — InfiniteTransition + linearGradient |
-| `ui/components/NetworkBanner.kt` | Animated offline banner using ConnectivityManager.NetworkCallback via produceState |
-| `ui/dashboard/DashboardScreen.kt` | Replaced CircularProgressIndicator with shimmer skeletons, NetworkBanner at top, error+Retry state |
-
-### Onboarding Flow
-| File | Description |
-|------|-------------|
-| `ui/onboarding/OnboardingViewModel.kt` | 3-page state machine (Welcome/Goals/Allergies), saves to DataStore + best-effort API sync |
-| `ui/onboarding/OnboardingScreen.kt` | AnimatedContent page transitions, goal sliders, allergen FilterChip grid |
-| `ui/NavHost.kt` | StartupViewModel routes to Login/Onboarding/Dashboard; OnboardingRoute added |
-
-### Navigation routing (StartupViewModel)
-- `authToken == null` → LoginRoute
-- `authToken != null && userName == null` → OnboardingRoute  
-- Both set → DashboardRoute
-- StartDestination shows loading spinner until flows emit
+### Security files
+- `.gitignore` — blocks `android/local.properties`, build dirs, keystores, `application-local.properties`
+- `.gitleaks.toml` — secret scanning; allowlist for `${ENV_VAR}`, `.claude/agents/`, `.claude/context/`
+- `.git-hooks/pre-commit` — runs `gitleaks protect --staged --verbose --redact` before every commit
 
 ---
 
-## What's PENDING (Android) — Next Session Priority Order
+## What's PENDING — Next Session Priority Order
 
-### 1. Testing
+### 1. Token Refresh Automation
+- `AuthRepository.refreshTokens()` + `CognitoService.refreshTokens()` are implemented but not wired
+- Add an OkHttp `Authenticator` to `AppModule.kt` that auto-calls `refreshTokens()` on 401 and retries
+
+### 2. History Screen Error Polish
+- History still uses `CircularProgressIndicator` — should match Dashboard: shimmer skeleton + NetworkBanner + Retry button
+
+### 3. Image Display for Old Meals
+- `imageKey` stored in Room; `imageUri` holds the presigned GET URL (valid ~5 min)
+- After URL expires, MealDetail/History cards show placeholder
+- Fix: add `GET /api/user/presigned-url?key=` endpoint on backend, or re-fetch on demand in MealDetailViewModel
+
+### 4. Unit + UI Tests
 - No tests written yet
-- Unit tests: ViewModels (mock repositories), Repository (mock API + DAO)
-- UI tests: Compose test rules for Dashboard, Camera flow
-
-### 2. Image Display for Old Meals
-- `imageKey` stored in Room — backend can return presigned GET URL inline in `MealResponse.imageUrl`
-- MealDetail + History cards: load `imageUri` (Coil) — will show placeholder for expired URLs
-- Long-term: either fetch fresh presigned URL on demand
-
-### 3. History screen error polish
-- History screen still uses CircularProgressIndicator — should get shimmer + retry button same as Dashboard
-
-### 4. Token refresh automation
-- `AuthRepository.refreshTokens()` exists but isn't wired into an OkHttp Authenticator
-- Add an `Authenticator` that auto-calls `refreshTokens()` on 401 responses
+- Unit: ViewModels (mock repositories), Repositories (mock API + DAO)
+- UI: Compose test rules for Dashboard, Camera flow
 
 ---
 
 ## What Android EXPECTS from Backend
 
-### Scan Flow (3-step — BREAKING CHANGE from multipart)
+### Scan Flow (3-step — presigned S3)
 ```
 Step 1: GET  /api/meals/scan/upload-url?contentType=image/jpeg  → UploadUrlResponse
-Step 2: PUT  <uploadUrl>  (direct to S3, raw bytes — Android handles this, NOT via backend)
+Step 2: PUT  <uploadUrl>  (direct to S3, raw bytes — Android handles, NOT via backend)
 Step 3: POST /api/meals/scan  { imageKey, contentType }          → ScanResponse
 ```
 
 ### Key Expectations
-- **Base URL (local dev):** `http://10.0.2.2:8098/` ← emulator → host, port 8098 (application-local.properties)
+- **Base URL (local dev):** `http://10.0.2.2:8098/` — emulator → host machine, port 8098
 - **Base URL (prod):** TBD (EC2)
 - All responses wrapped: `{ "status": "success", "data": {...} }` or `{ "status": "error", "error": { "code": "...", "message": "..." } }`
-- JWT via `Authorization: Bearer <token>` (currently absent in dev — API returns 401, Room data shown)
+- JWT via `Authorization: Bearer <idToken>` — Cognito ID token, validated by backend
 - Dates as ISO strings: `"2026-04-24"`
 - UUIDs as strings
-- Null fields omitted (Jackson NON_NULL)
+- Null fields omitted (Jackson `NON_NULL`)
 - Macros as `Double` in JSON (`42.0`)
+- `DELETE /api/meals/{id}` must return `200` with envelope — NOT `204 No Content`
 
 ### Full Retrofit Interface (CaltrackApi.kt)
 ```kotlin
@@ -219,14 +223,6 @@ suspend fun triggerScan(@Body request: ScanRequest): Response<ApiEnvelope<ScanRe
 }
 ```
 
-### DELETE /api/meals/{id}
-Must return `200 { "status": "success", "data": null }` — NOT 204 No Content.
-
-### GET /api/meals/weekly
-```json
-{ "status": "success", "data": { "days": [{ "date": "2026-04-18", "totalCalories": 1850.0 }, ...] } }
-```
-
 ---
 
 ## Shared Constants
@@ -234,7 +230,7 @@ Must return `200 { "status": "success", "data": null }` — NOT 204 No Content.
 |----------|-------|
 | Max image size | 10MB |
 | Target compressed size | 500KB |
-| Default calorie goal | 2000 |
+| Default calorie goal | 2000 kcal |
 | Default protein goal | 150g |
 | Default carbs goal | 250g |
 | Default fat goal | 65g |
